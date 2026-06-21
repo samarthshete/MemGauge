@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: MemGauge
+    orgId: 1
+    folder: MemGauge
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

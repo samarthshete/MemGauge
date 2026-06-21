@@ -1,0 +1,18 @@
+# Example SLO alert rules for a future Prometheus rule_files section.
+# Not enabled in Phase 6; kept commented so the stack remains quiet by default.
+#
+# groups:
+#   - name: memgauge-slo
+#     rules:
+#       - alert: MemGaugeSearchP95TooHigh
+#         expr: |
+#           histogram_quantile(
+#             0.95,
+#             sum(rate(memgauge_memory_operation_latency_seconds_bucket{operation="search"}[5m])) by (le)
+#           ) > 0.2
+#         for: 10m
+#         labels:
+#           severity: page
+#         annotations:
+#           summary: "MemGauge search p95 is above 200ms"
+#           description: "Search p95 has exceeded the Phase 6 SLO for at least 10 minutes."

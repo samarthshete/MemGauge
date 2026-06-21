@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MemGauge Report</title>
+    <link rel="stylesheet" href="/static/report.css">
+  </head>
+  <body>
+    <main class="page">
+      <header class="report-header">
+        <div>
+          <p class="eyebrow">MemGauge evaluation</p>
+          <h1>{{ report.run.dataset_name }}</h1>
+          <div class="meta">
+            <span>Backend: {{ report.run.backend_mode }}</span>
+            <span>Git: {{ report.run.git_sha or "not recorded" }}</span>
+            <span>Cases: {{ report.run.total_cases }}</span>
+          </div>
+        </div>
+        <span class="badge {% if report.run.passed %}pass{% else %}fail{% endif %}">
+          {% if report.run.passed %}PASS{% else %}FAIL{% endif %}
+        </span>
+      </header>
+
+      <section class="metrics-summary" aria-label="Metrics summary">
+        <div>
+          <span>Recall@5</span>
+          <strong>{{ "%.3f"|format(report.run.recall_at_5) }}</strong>
+        </div>
+        <div>
+          <span>Precision</span>
+          <strong>{{ "%.3f"|format(report.run.precision) }}</strong>
+        </div>
+        <div>
+          <span>Stale</span>
+          <strong>{{ "%.3f"|format(report.run.staleness_rate) }}</strong>
+        </div>
+        <div>
+          <span>False facts</span>
+          <strong>{{ "%.3f"|format(report.run.false_fact_rate) }}</strong>
+        </div>
+        <div>
+          <span>Search p95</span>
+          <strong>{{ "%.1f"|format(report.run.p95_search_ms) }}ms</strong>
+        </div>
+        <div>
+          <span>Add p95</span>
+          <strong>{{ "%.1f"|format(report.run.p95_add_ms) }}ms</strong>
+        </div>
+      </section>
+
+      <section class="metric-bars" aria-label="Metric comparison to baseline">
+        <h2>Baseline Comparison</h2>
+        {% for metric in report.metric_rows %}
+          <div class="metric-row">
+            <div class="metric-label">
+              <strong>{{ metric.label }}</strong>
+              <span>{{ metric.direction }} is better</span>
+            </div>
+            <div class="bar-stack">
+              <div class="bar-line">
+                <span class="bar-name">Run</span>
+                <div class="bar-track">
+                  <span class="bar run" style="width: {{ metric.value_width }}%"></span>
+                </div>
+                <span class="bar-value">{{ "%.3f"|format(metric.value) }}{{ metric.unit }}</span>
+              </div>
+              <div class="bar-line">
+                <span class="bar-name">Base</span>
+                <div class="bar-track">
+                  <span class="bar baseline" style="width: {{ metric.baseline_width }}%"></span>
+                </div>
+                <span class="bar-value">{{ "%.3f"|format(metric.baseline) }}{{ metric.unit }}</span>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </section>
+
+      <section class="cases">
+        <div class="section-heading">
+          <h2>Case Results</h2>
+          <div class="counts">
+            {% for mode, count in report.failure_mode_counts.items() %}
+              <span class="pill {{ mode }}">{{ mode }}: {{ count }}</span>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% if report.cases|length == 0 %}
+          <div class="empty-state">No case results were recorded for this run.</div>
+        {% else %}
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Failure mode</th>
+                <th>Expected</th>
+                <th>Top result</th>
+                <th>Score</th>
+                <th>Latency</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for case in report.cases %}
+                <tr class="case-{{ case.failure_mode }}">
+                  <td>{{ case.case_id }}</td>
+                  <td><span class="pill {{ case.failure_mode }}">{{ case.failure_mode }}</span></td>
+                  <td>{{ case.expected.label or "none" }}</td>
+                  <td>
+                    {% if case.retrieved|length > 0 %}
+                      {{ case.retrieved[0].content }}
+                    {% else %}
+                      No result
+                    {% endif %}
+                  </td>
+                  <td>{{ "%.2f"|format(case.score) }}</td>
+                  <td>{{ "%.1f"|format(case.latency_ms) }}ms</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
