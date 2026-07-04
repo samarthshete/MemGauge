@@ -7,6 +7,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -23,6 +24,7 @@ from app.routers.eval import router as eval_router
 from app.routers.health import router as health_router
 from app.routers.memories import router as memories_router
 from app.routers.report import router as report_router
+from app.security import RateLimiter, build_rate_limit_middleware
 
 settings = get_settings()
 configure_observability(settings)
@@ -30,6 +32,9 @@ logger = logging.getLogger("memgauge.access")
 
 
 def create_app() -> FastAPI:
+    # Re-read settings so the app (and its rate limiter / CORS) reflect the
+    # current environment — keeps the config overridable per test.
+    settings = get_settings()
     app = FastAPI(title="MemGauge", version="0.1.0")
     app.state.settings = settings
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -73,6 +78,24 @@ def create_app() -> FastAPI:
                 )
                 if "response" in locals():
                     response.headers["x-request-id"] = request_id
+
+    # Per-client rate limiting (Redis-backed, in-memory fallback, fail-open).
+    rate_limiter = RateLimiter(
+        limit=settings.rate_limit_per_min,
+        redis_url=settings.redis_url,
+    )
+    app.middleware("http")(build_rate_limit_middleware(rate_limiter))
+
+    # CORS is added last so it is the outermost layer: it answers preflight
+    # OPTIONS before auth/rate-limit and tags error responses too. An empty
+    # CORS_ALLOW_ORIGINS yields an empty allow-list -> no cross-origin allowed.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

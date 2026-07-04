@@ -79,7 +79,14 @@ async def app_client(clean_stores: None) -> AsyncIterator[AsyncClient]:
 
     app = create_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+    # Default to the dev token so existing tests exercise the (now protected)
+    # mutating routes; dedicated security tests build their own unauthenticated
+    # clients to assert the 401 path.
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers={"Authorization": "Bearer dev-token"},
+    ) as client:
         yield client
 """Pytest configuration placeholder."""
 

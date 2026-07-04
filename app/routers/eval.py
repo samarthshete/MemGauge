@@ -14,9 +14,12 @@ from app.db.models import EvalRun
 from app.deps import get_db_session
 from app.eval.report import build_report
 from app.eval.runner import run_eval
+from app.security import require_token
 
 router = APIRouter(prefix="/v1/eval", tags=["eval"])
 DB_SESSION_DEPENDENCY = Depends(get_db_session)
+# Running an eval is expensive/mutating -> protected; listing runs stays public.
+REQUIRE_TOKEN = Depends(require_token)
 
 
 class RunEvalRequest(BaseModel):
@@ -24,7 +27,7 @@ class RunEvalRequest(BaseModel):
     set_baseline: bool = False
 
 
-@router.post("/run")
+@router.post("/run", dependencies=[REQUIRE_TOKEN])
 async def run_eval_route(payload: RunEvalRequest) -> dict[str, Any]:
     return await run_eval(dataset=payload.dataset, set_baseline=payload.set_baseline)
 

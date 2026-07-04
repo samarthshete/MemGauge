@@ -15,9 +15,12 @@ from app.config import get_settings
 from app.deps import get_memory_backend
 from app.memory.base import MemoryBackend
 from app.observability import get_tracer, record_operation_latency
+from app.security import require_token
 
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 MEMORY_BACKEND_DEPENDENCY = Depends(get_memory_backend)
+# Mutations require a bearer token; reads (search/list) stay public — see app/security.py.
+REQUIRE_TOKEN = Depends(require_token)
 
 
 class AddMemoryRequest(BaseModel):
@@ -55,7 +58,7 @@ class SearchResponse(BaseModel):
     cache: str = Field(default="miss")
 
 
-@router.post("", response_model=AddMemoryResponse)
+@router.post("", response_model=AddMemoryResponse, dependencies=[REQUIRE_TOKEN])
 async def add_memory(
     payload: AddMemoryRequest,
     backend: MemoryBackend = MEMORY_BACKEND_DEPENDENCY,
@@ -111,7 +114,7 @@ async def list_memories(
     return await backend.list(user_id=user_id, limit=limit, offset=offset)
 
 
-@router.delete("/{memory_id}")
+@router.delete("/{memory_id}", dependencies=[REQUIRE_TOKEN])
 async def delete_memory(
     memory_id: UUID,
     backend: MemoryBackend = MEMORY_BACKEND_DEPENDENCY,
