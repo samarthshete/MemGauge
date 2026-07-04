@@ -1,2 +1,0 @@
-"""Graph router placeholder."""
-

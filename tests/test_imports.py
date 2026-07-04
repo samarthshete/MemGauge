@@ -24,7 +24,6 @@ MODULES = [
     "app.routers",
     "app.routers.memories",
     "app.routers.eval",
-    "app.routers.graph",
     "app.routers.health",
     "app.eval",
     "app.eval.runner",
