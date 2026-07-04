@@ -17,9 +17,8 @@ each failure into one of three modes. A CI gate compares each run to a committed
 baseline and turns red on regression — with a Markdown report you can read in the
 PR.
 
-![MemGauge eval report](docs/screenshot-report.png)
-<!-- SCREENSHOT PLACEHOLDER: replace docs/screenshot-report.png with a capture of
-     GET /report/{run_id} (the eval report page) or the Grafana latency panel. -->
+The demo report is server-rendered at `GET /report/{run_id}` after `make report`;
+Grafana is available locally at `http://127.0.0.1:13000`.
 
 ## Architecture
 
@@ -41,6 +40,16 @@ flowchart LR
 
 ## Quickstart
 
+Pinned local setup:
+
+```bash
+make venv                            # Python 3.11.x; uses python3.11 by default
+make doctor                          # verifies Python, deps, Docker, Compose
+make test-unit                       # pure-unit suite, runs offline
+```
+
+See [docs/DEV_ENV.md](docs/DEV_ENV.md) for pyenv/asdf setup and troubleshooting.
+
 ```bash
 # 1. Bring up the full stack (API + Postgres/pgvector + Neo4j + Redis + Prom/Grafana)
 docker compose up --build            # API on http://127.0.0.1:18000
@@ -54,10 +63,12 @@ curl localhost:18000/healthz
 open http://127.0.0.1:13000          # Grafana (anonymous viewer)
 ```
 
-Local unit tests need no services at all:
+Useful verification commands:
 
 ```bash
 make test-unit                       # pure-unit suite, runs offline
+make r6-observability                # live stack observability proof
+make r7-resilience                   # live stack resilience proof
 ```
 
 ## The three failure modes
@@ -79,11 +90,11 @@ fraction of cases landing in those buckets.
 | --- | --- | --- |
 | `GET` | `/healthz` | Liveness + dependency status (Postgres/Neo4j/Redis). |
 | `GET` | `/metrics` | Prometheus metrics (HTTP, operation latency, latest eval recall/pass). |
-| `POST` | `/v1/memories` | Add a memory; returns the stored memory + ADD/UPDATE/NOOP events. |
+| `POST` | `/v1/memories` | Add a memory; returns the stored memory + ADD/UPDATE/NOOP events. Requires bearer token. |
 | `GET` | `/v1/memories/search` | Hybrid search with per-signal score breakdown. |
 | `GET` | `/v1/memories` | List active memories for a user. |
-| `DELETE` | `/v1/memories/{memory_id}` | Soft-delete (writes a DELETE audit event). |
-| `POST` | `/v1/eval/run` | Run the benchmark; persists an `EvalRun` + per-case results. |
+| `DELETE` | `/v1/memories/{memory_id}` | Soft-delete (writes a DELETE audit event). Requires bearer token. |
+| `POST` | `/v1/eval/run` | Run the benchmark; persists an `EvalRun` + per-case results. Requires bearer token. |
 | `GET` | `/v1/eval/runs` | List recent eval runs. |
 | `GET` | `/v1/eval/report/{run_id}` | Eval run report as JSON. |
 | `GET` | `/report/{run_id}` | Server-rendered HTML eval report (the demo page). |
@@ -108,10 +119,11 @@ run fully offline. This is what the committed baseline and the CI gate use.
 ### `mem0` (real backend — validated locally with your own key)
 
 ```bash
-pip install mem0ai                     # not a committed dependency
+pip install mem0ai                     # optional; not a committed dependency
 export MEMGAUGE_BACKEND=mem0
 export OPENAI_API_KEY=sk-...           # local OSS Mem0, or:
 export MEM0_API_KEY=...                # hosted Mem0 platform
+make mem0-preflight
 make eval                              # scores real Mem0 into the same tables
 ```
 
@@ -125,6 +137,9 @@ the mock.
 > an LLM. `mem0` is the real backend, validated locally with your own key, and is
 > deliberately not wired into CI so the public repo stays runnable with no
 > secrets.
+
+See [docs/MEM0_VERIFICATION.md](docs/MEM0_VERIFICATION.md) for the optional
+real-backend verification flow.
 
 ## SLOs & CI gate thresholds
 
@@ -156,7 +171,19 @@ goes red on regression, green on revert.
      - Against real Mem0 (local, OpenAI embeddings), recall@5 was <Y> and p95 was
        <Z> ms — note any stale_fact / false_fact differences vs. the mock. -->
 
-_TODO: add one concrete, measured observation here after a real run._
+- On the synthetic + adversarial set (40 cases), the mock backend holds
+  recall@5 = 0.875. The regenerated behavior-driven baseline has
+  `staleness_rate = 0.000` and `false_fact_rate = 0.125`.
+- The regression gate was verified live: a forced top-k regression dropped
+  recall@5 to 0.625 and exited non-zero; reverting restored a passing gate.
+- Observability was verified live with `make r6-observability`: direct
+  `/metrics` and Prometheus both showed non-zero add/search series, Grafana
+  loaded the provisioned `MemGauge Overview` dashboard, and API logs contained a
+  `memory.add` span plus structured `trace_id`.
+- Resilience was verified live with `make r7-resilience`: bad memory input
+  returned 422, deleting a missing memory returned 404, `/healthz` returned 503
+  while Redis was stopped, search still returned a seeded memory during the
+  Redis outage, and Redis recovered cleanly.
 
 ## Limitations
 
@@ -165,11 +192,15 @@ _TODO: add one concrete, measured observation here after a real run._
   meaningful relative to the baseline.
 - **Single backend validated in CI.** Only `mock` runs in CI (secret-free).
   `mem0` is validated locally; other backends would each need an adapter.
-- **`stale_fact` / `false_fact` are dataset-labeled** for adversarial cases, so
-  those rates reflect the harness's intent, while recall and latency are measured
-  live from the backend.
-- Auth is a dev placeholder (`MEMGAUGE_API_TOKEN=dev-token`); add real auth before
-  exposing publicly.
+- **Synthetic adversarial cases.** `stale_fact` and `false_fact` are measured
+  from observed backend behavior against synthetic adversarial inputs, not
+  production traffic.
+- **Demo security defaults.** Mutating/expensive routes require
+  `Authorization: Bearer <MEMGAUGE_API_TOKEN>`, but the default `dev-token` is
+  local-only. Set a real token and CORS allow-list before exposing the API.
+
+See [docs/PRODUCTION_HARDENING.md](docs/PRODUCTION_HARDENING.md) before exposing
+the API beyond localhost.
 
 ## How this scales at 100M+ calls
 
