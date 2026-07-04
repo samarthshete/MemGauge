@@ -42,58 +42,66 @@ Neon), **Neo4j Aura Free**, **managed Redis** (Upstash).
 | Graph | Neo4j Aura Free | `neo4j+s://...` URI, user, password |
 | Redis | Upstash | a `rediss://...` TLS URL |
 
-### 2. Initialize the database schema
+### 2. Initialize the database schema (one-time, required)
 
-The schema (tables, pgvector extension, indexes) lives in `app/db/init.sql`. Apply
-it once against the managed Postgres using its **direct** (non-async) URL:
+**Locally**, `app/db/init.sql` is applied automatically because `docker-compose.yml`
+mounts it into the Postgres container's `/docker-entrypoint-initdb.d/`. **Managed
+Postgres will never run it** — there is no app-side migration step, so you must
+apply it once by hand against the managed instance, using its **direct** (plain
+`postgresql://`, non-async) URL:
 
 ```bash
 psql "postgresql://USER:PASS@HOST:5432/memgauge" -v ON_ERROR_STOP=1 -f app/db/init.sql
 ```
 
+It is idempotent (`CREATE ... IF NOT EXISTS`), so re-running is safe. Verify with
+`psql ... -c '\dt'` — expect `memories`, `memory_events`, `eval_runs`,
+`eval_case_results`.
+
+**Neo4j needs no manual schema step**, but note the timing: uniqueness constraints
+are created by `Neo4jClient.ensure_constraints()`, which is called by the eval
+runner (`app/eval/runner.py`) and the seed script — **not at app startup**. On a
+fresh Aura instance the constraints appear on the first `POST /v1/eval/run` (or
+`make seed`), so run one eval as part of deploy verification.
+
 ### 3. Configure Fly
 
-`fly.toml` (one small machine is plenty):
-
-```toml
-app = "memgauge"
-primary_region = "iad"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[http_service]
-  internal_port = 8000
-  force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0
-
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
-
-[checks.health]
-  type = "http"
-  path = "/healthz"
-  interval = "30s"
-  timeout = "5s"
-  grace_period = "20s"
-```
+A ready `fly.toml` is committed at the repo root (one `shared-cpu-1x` machine,
+internal port 8000, HTTP health check on `/healthz`, `MEMGAUGE_BACKEND=mock`
+pinned as non-secret env). Note the health check lives under
+`[[http_service.checks]]` (current Fly syntax), and `/healthz` returns 503 until
+Postgres, Neo4j, **and** Redis are all reachable — so finish steps 1–2 and set
+all secrets before the first `fly deploy`, or the release will never pass its
+health check.
 
 ### 4. Set secrets and deploy
 
-Secrets are injected as env vars — never baked into the image:
+All runtime configuration is env-driven (`app/config.py`). Non-secret values
+(`PORT`, `MEMGAUGE_BACKEND=mock`) live in `fly.toml`; everything else is set as
+Fly secrets — never committed, never baked into the image:
+
+| Secret | Value shape | Notes |
+| --- | --- | --- |
+| `MEMGAUGE_API_TOKEN` | strong random string | Generate at deploy time, e.g. `openssl rand -hex 32`. **Never** the local `dev-token`. Protects `POST /v1/memories`, `DELETE /v1/memories/{id}`, `POST /v1/eval/run`. |
+| `POSTGRES_DSN` | `postgresql+asyncpg://USER:PASS@HOST:5432/memgauge` | Must use the **async** `postgresql+asyncpg://` scheme. |
+| `NEO4J_URI` | `neo4j+s://XXXX.databases.neo4j.io` | Aura uses the TLS `neo4j+s://` scheme. |
+| `NEO4J_USER` / `NEO4J_PASSWORD` | from Aura | |
+| `REDIS_URL` | `rediss://default:PASS@HOST:6379` | Upstash uses TLS `rediss://`. |
+| `EMBEDDING_MODEL` | `__offline-deploy-model__` (recommended) | A name fastembed can't load (the `__offline-*-model__` convention) makes `EmbeddingProvider` fall back to the deterministic 384-d hash embedder — no model download, matches what CI/R1 verified, fits the 512 MB VM. Set `BAAI/bge-small-en-v1.5` only if you deliberately want fastembed to download the real model. |
+| `CORS_ALLOW_ORIGINS` | empty (default) | Empty = no browser origins allowed. Set a comma-separated origin list only if a browser client needs the API. |
+| `RATE_LIMIT_PER_MIN` | `60` (default) | Redis-backed fixed-window per client IP, fail-open. |
 
 ```bash
-fly launch --no-deploy            # creates the app from fly.toml
+fly launch --no-deploy            # registers the app from the committed fly.toml
 fly secrets set \
+  MEMGAUGE_API_TOKEN="$(openssl rand -hex 32)" \
   POSTGRES_DSN="postgresql+asyncpg://USER:PASS@HOST:5432/memgauge" \
   NEO4J_URI="neo4j+s://XXXX.databases.neo4j.io" \
   NEO4J_USER="neo4j" \
   NEO4J_PASSWORD="..." \
   REDIS_URL="rediss://default:PASS@HOST:6379" \
-  MEMGAUGE_API_TOKEN="replace-me"
+  EMBEDDING_MODEL="__offline-deploy-model__" \
+  RATE_LIMIT_PER_MIN="60"
 fly deploy
 ```
 
