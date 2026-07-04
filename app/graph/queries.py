@@ -32,6 +32,6 @@ RETURN
     target.name AS target,
     rel.predicate AS predicate,
     rel.valid_from AS valid_from,
-    rel.source_memory_id AS memory_id
+    rel.memory_id AS memory_id
 ORDER BY predicate, target
 """

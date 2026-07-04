@@ -35,3 +35,52 @@ async def test_multi_hop_related_entities_and_collision_query(clean_stores: None
         } >= {(frozenset({"Acme Inc", "AcmeInc"}), 0)}
     finally:
         await graph.close()
+
+
+async def test_active_facts_returns_non_null_memory_id(clean_stores: None) -> None:
+    """Regression for BUG-1: ACTIVE_FACTS must surface the real `memory_id`.
+
+    The query previously read `rel.source_memory_id` (never written), so every
+    `active_facts()` row came back with `memory_id = None`. Seeding a fact through
+    the real write path (which sets `rel.memory_id`) must yield a non-null
+    `memory_id` equal to the stored memory's id.
+    """
+
+    from app.config import get_settings
+    from app.db.session import AsyncSessionLocal
+    from app.graph.neo4j_client import Neo4jClient
+    from app.memory.embeddings import get_embedding_provider
+    from app.memory.mock_backend import MockMemoryBackend
+
+    settings = get_settings()
+    graph = Neo4jClient(settings=settings)
+    try:
+        async with AsyncSessionLocal() as session:
+            backend = MockMemoryBackend(
+                session=session,
+                graph=graph,
+                embeddings=get_embedding_provider(),
+            )
+            add_result = await backend.add(
+                text="PhaseEightDana likes oolong tea.",
+                user_id="phase8-active-facts",
+            )
+
+        assert add_result["stored"] is True
+        stored_memory_id = add_result["memory"]["id"]
+
+        facts = await graph.active_facts("PhaseEightDana")
+
+        # The fact exists and is active.
+        assert facts, "expected at least one active fact for the seeded entity"
+        fact = next(f for f in facts if f["target"] == "oolong tea")
+
+        # The bug fix: memory_id is present, non-null, and the actual stored id.
+        assert "memory_id" in fact
+        assert fact["memory_id"] is not None
+        assert fact["memory_id"] == stored_memory_id
+
+        # Guard against the old wrong field leaking back into the public result.
+        assert "source_memory_id" not in fact
+    finally:
+        await graph.close()
