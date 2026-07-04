@@ -18,6 +18,11 @@ venv/
 
 .DS_Store
 
+# Generated eval artifacts (CI uploads report.md as a build artifact; never track)
+report.md
+report.html
+scratchpad/
+
 .cache/
 model_cache/
 models/
