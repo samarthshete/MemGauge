@@ -10,11 +10,26 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
-from app.eval.report import read_baseline
-from app.eval.runner import run_eval
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+os.environ.setdefault(
+    "POSTGRES_DSN",
+    "postgresql+asyncpg://memgauge:memgauge@127.0.0.1:15432/memgauge",
+)
+os.environ.setdefault("NEO4J_URI", "bolt://127.0.0.1:17687")
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "memgauge-dev")
+os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:16379/0")
+
+from app.eval.report import read_baseline  # noqa: E402
+from app.eval.runner import run_eval  # noqa: E402
 
 REPORT_PATH = Path("report.md")
 

@@ -4,11 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
+from pathlib import Path
 
-from app.db.session import AsyncSessionLocal
-from app.graph.neo4j_client import Neo4jClient
-from app.memory.embeddings import get_embedding_provider
-from app.memory.mock_backend import MockMemoryBackend
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+os.environ.setdefault(
+    "POSTGRES_DSN",
+    "postgresql+asyncpg://memgauge:memgauge@127.0.0.1:15432/memgauge",
+)
+os.environ.setdefault("NEO4J_URI", "bolt://127.0.0.1:17687")
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "memgauge-dev")
+os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:16379/0")
+
+from app.db.session import AsyncSessionLocal  # noqa: E402
+from app.graph.neo4j_client import Neo4jClient  # noqa: E402
+from app.memory.embeddings import get_embedding_provider  # noqa: E402
+from app.memory.mock_backend import MockMemoryBackend  # noqa: E402
 
 
 async def main() -> None:

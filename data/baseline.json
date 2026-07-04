@@ -2,17 +2,15 @@
   "dataset": "all",
   "failure_mode_counts": {
     "false_fact": 5,
-    "none": 27,
-    "retrieval_miss": 3,
-    "stale_fact": 5
+    "none": 35
   },
   "false_fact_rate": 0.125,
-  "p95_add_ms": 57.607945798372384,
-  "p95_search_ms": 28.766895501394174,
+  "p95_add_ms": 50.77428310760297,
+  "p95_search_ms": 9.475691636907868,
   "passed": true,
   "precision": 0.5,
   "recall_at_5": 0.875,
-  "run_id": "928c3e0f-6b5c-4920-aaa4-cd2f66c84c14",
-  "staleness_rate": 0.125,
+  "run_id": "722ab8ad-a9f8-459d-8139-c609b195bc6b",
+  "staleness_rate": 0.0,
   "total_cases": 40
 }
