@@ -55,36 +55,67 @@ def test_classifier_detects_stale_and_false_fact_buckets() -> None:
     )
 
 
-def test_classifier_honors_target_failure_mode_over_default_success() -> None:
+def test_target_failure_mode_does_not_override_observed_success() -> None:
+    """BUG-2 / R4 regression: the case label must NOT stamp the outcome.
+
+    When the backend behaves correctly (expected fact retrieved, nothing stale or
+    fabricated returned), the result is ``none`` regardless of the case's
+    ``target_failure_mode`` — otherwise staleness/false-fact rates measure labels,
+    not behavior.
+    """
+
+    # Backend correctly returned the expected fact; a stale-labeled case must NOT
+    # be counted as stale.
     assert (
         classify_case(
-            expected_memory_id="mem-1",
-            retrieved=[{"id": "mem-1"}],
-            inactive_memory_ids=set(),
-            sarcastic_memory_ids=set(),
-            target_failure_mode=FALSE_FACT,
-        )
-        == FALSE_FACT
-    )
-    assert (
-        classify_case(
-            expected_memory_id="mem-1",
-            retrieved=[{"id": "mem-2"}],
-            inactive_memory_ids=set(),
+            expected_memory_id="mem-current",
+            retrieved=[{"id": "mem-current"}],
+            inactive_memory_ids={"mem-old"},
             sarcastic_memory_ids=set(),
             target_failure_mode=STALE_FACT,
         )
-        == STALE_FACT
+        == FAILURE_NONE
     )
+
+    # Backend correctly withheld a fabrication; a false-fact-labeled case must NOT
+    # be counted as a false fact just because the label says so.
     assert (
         classify_case(
             expected_memory_id=None,
             retrieved=[],
             inactive_memory_ids=set(),
-            sarcastic_memory_ids=set(),
-            target_failure_mode=RETRIEVAL_MISS,
+            sarcastic_memory_ids={"mem-fake"},
+            target_failure_mode=FALSE_FACT,
         )
-        == RETRIEVAL_MISS
+        == FAILURE_NONE
+    )
+
+
+def test_failure_modes_are_detected_behaviorally_under_their_target_labels() -> None:
+    """The same labeled cases ARE counted as failures when the backend truly fails."""
+
+    # Stale-labeled case where the backend actually served the superseded fact.
+    assert (
+        classify_case(
+            expected_memory_id="mem-current",
+            retrieved=[{"id": "mem-old"}],
+            inactive_memory_ids={"mem-old"},
+            sarcastic_memory_ids=set(),
+            target_failure_mode=STALE_FACT,
+        )
+        == STALE_FACT
+    )
+
+    # False-fact-labeled case where the backend actually returned the fabrication.
+    assert (
+        classify_case(
+            expected_memory_id=None,
+            retrieved=[{"id": "mem-fake"}],
+            inactive_memory_ids=set(),
+            sarcastic_memory_ids={"mem-fake"},
+            target_failure_mode=FALSE_FACT,
+        )
+        == FALSE_FACT
     )
 
 

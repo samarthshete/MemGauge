@@ -174,6 +174,10 @@ async def _run_case(
     retrieved = search_result["items"]
 
     inactive_ids = await _inactive_memory_ids(case["user_id"], backend)
+    # BUG-2 / ROADMAP R4: classify purely from observed backend behavior. The
+    # case's target_failure_mode is NOT used to stamp the result — a case counts
+    # as a failure only when the backend genuinely produced one, so staleness and
+    # false-fact rates measure behavior rather than labels.
     failure_mode = classify_case(
         expected_memory_id=expected_memory_id,
         retrieved=retrieved,
@@ -181,8 +185,6 @@ async def _run_case(
         sarcastic_memory_ids=sarcastic_ids,
         target_failure_mode=case.get("target_failure_mode"),
     )
-    if case.get("target_failure_mode") in {"stale_fact", "false_fact"}:
-        failure_mode = case["target_failure_mode"]
 
     score = 1.0 if failure_mode == "none" else 0.0
     return {
