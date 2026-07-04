@@ -28,4 +28,7 @@ url='http://127.0.0.1:'+os.environ.get('PORT','8000')+'/healthz'; \
 sys.exit(0 if urllib.request.urlopen(url, timeout=4).status==200 else 1)" || exit 1
 
 # Config is entirely env-driven (see app/config.py). PORT is overridable.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# UVICORN_WORKERS scales the API across CPU cores (default 1). The single-worker
+# event loop is CPU-bound under load (see docs/LOAD_TEST.md); raising this is the
+# throughput fix once a single core saturates.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${UVICORN_WORKERS:-1}"]
