@@ -29,18 +29,33 @@ docker run --rm -p 8000:8000 \
   memgauge:latest
 ```
 
-## One concrete path: Fly.io + managed data services
+## Chosen path: zero-cost, no credit card — Render + free managed data services
 
-**Target:** API on **Fly.io**, **managed Postgres with pgvector** (Supabase or
-Neon), **Neo4j Aura Free**, **managed Redis** (Upstash).
+**Target:** API on **Render** (free web service, `render.yaml` committed at the
+repo root — runs the Dockerfile unchanged), **Neon or Supabase** Postgres with
+pgvector, **Neo4j Aura Free**, **Upstash** Redis. **Every provider's free tier
+requires no credit card. Total cost: $0.**
+
+Accepted free-tier trade-offs (documented, not hidden):
+
+- **Render free** spins the service down after ~15 min idle; the first request
+  after that pays a ~1 min cold start.
+- **Neon free** autosuspends compute when idle; the first query after resume
+  adds ~1 s.
+- **Neo4j Aura Free pauses after 3 days of inactivity.** While paused,
+  `/healthz` reports `neo4j: down` (503) until you resume it in the Aura
+  console — Render's health check will show the service unhealthy during that
+  window. Long-paused (~30 days) Aura Free instances can be deleted by Neo4j.
+- **Upstash free** command quota is ample here; the app treats Redis as
+  fail-open, so even an exhausted quota degrades to cache-miss, not an outage.
 
 ### 1. Provision the managed services
 
 | Service | Provider | What you need |
 | --- | --- | --- |
-| Postgres + pgvector | Supabase / Neon | a connection string; confirm the `vector` extension is available |
+| Postgres + pgvector | Neon / Supabase (free) | a connection string; confirm the `vector` extension is available |
 | Graph | Neo4j Aura Free | `neo4j+s://...` URI, user, password |
-| Redis | Upstash | a `rediss://...` TLS URL |
+| Redis | Upstash (free) | a `rediss://...` TLS URL |
 
 ### 2. Initialize the database schema (one-time, required)
 
@@ -64,21 +79,29 @@ runner (`app/eval/runner.py`) and the seed script — **not at app startup**. On
 fresh Aura instance the constraints appear on the first `POST /v1/eval/run` (or
 `make seed`), so run one eval as part of deploy verification.
 
-### 3. Configure Fly
+### 3. Configure Render
 
-A ready `fly.toml` is committed at the repo root (one `shared-cpu-1x` machine,
-internal port 8000, HTTP health check on `/healthz`, `MEMGAUGE_BACKEND=mock`
-pinned as non-secret env). Note the health check lives under
-`[[http_service.checks]]` (current Fly syntax), and `/healthz` returns 503 until
-Postgres, Neo4j, **and** Redis are all reachable — so finish steps 1–2 and set
-all secrets before the first `fly deploy`, or the release will never pass its
-health check.
+A ready `render.yaml` Blueprint is committed at the repo root: free plan,
+`runtime: docker` (the existing Dockerfile deploys unchanged; Render injects
+`PORT` and the CMD honors it), health check on `/healthz`, `autoDeploy: false`
+(deploys are explicit, not per-push), and non-secret env pinned
+(`MEMGAUGE_BACKEND=mock`, `EMBEDDING_MODEL=__offline-deploy-model__`,
+`RATE_LIMIT_PER_MIN=60`). Secret env vars are declared `sync: false`, so Render
+prompts for their values at blueprint creation and never stores them in git.
+
+`/healthz` returns 503 until Postgres, Neo4j, **and** Redis are all reachable —
+so finish steps 1–2 and have all secret values ready before the first deploy,
+or the service will never pass its health check.
+
+Deploy flow: push to GitHub → Render dashboard → **New → Blueprint** → select
+the repo → Render reads `render.yaml` → enter the six secret values when
+prompted → Apply.
 
 ### 4. Set secrets and deploy
 
 All runtime configuration is env-driven (`app/config.py`). Non-secret values
-(`PORT`, `MEMGAUGE_BACKEND=mock`) live in `fly.toml`; everything else is set as
-Fly secrets — never committed, never baked into the image:
+live in `render.yaml`; everything else is entered as Render secret env vars —
+never committed, never baked into the image:
 
 | Secret | Value shape | Notes |
 | --- | --- | --- |
@@ -91,19 +114,11 @@ Fly secrets — never committed, never baked into the image:
 | `CORS_ALLOW_ORIGINS` | empty (default) | Empty = no browser origins allowed. Set a comma-separated origin list only if a browser client needs the API. |
 | `RATE_LIMIT_PER_MIN` | `60` (default) | Redis-backed fixed-window per client IP, fail-open. |
 
-```bash
-fly launch --no-deploy            # registers the app from the committed fly.toml
-fly secrets set \
-  MEMGAUGE_API_TOKEN="$(openssl rand -hex 32)" \
-  POSTGRES_DSN="postgresql+asyncpg://USER:PASS@HOST:5432/memgauge" \
-  NEO4J_URI="neo4j+s://XXXX.databases.neo4j.io" \
-  NEO4J_USER="neo4j" \
-  NEO4J_PASSWORD="..." \
-  REDIS_URL="rediss://default:PASS@HOST:6379" \
-  EMBEDDING_MODEL="__offline-deploy-model__" \
-  RATE_LIMIT_PER_MIN="60"
-fly deploy
-```
+Enter the values when the Blueprint prompts for the `sync: false` keys
+(generate the token with `openssl rand -hex 32`), then Apply — Render builds
+the Dockerfile and deploys. (`EMBEDDING_MODEL` and `RATE_LIMIT_PER_MIN` are
+already pinned as non-secret env in `render.yaml`; `CORS_ALLOW_ORIGINS` is
+omitted so the empty default applies.)
 
 > Connection-string notes: the app uses the **async** Postgres driver, so the DSN
 > must start with `postgresql+asyncpg://`. Neo4j Aura uses the TLS `neo4j+s://`
@@ -112,11 +127,26 @@ fly deploy
 ### 5. Verify
 
 ```bash
-curl https://memgauge.fly.dev/healthz          # -> {"status":"ok", ...}
-# Optionally generate a run, then view the report page:
-curl -X POST https://memgauge.fly.dev/v1/eval/run -H 'content-type: application/json' -d '{"dataset":"all"}'
-# open https://memgauge.fly.dev/report/<run_id>
+curl https://memgauge.onrender.com/healthz     # -> {"status":"ok", ...}  (first hit after idle: ~1 min cold start)
+# Unauthenticated mutation must be rejected:
+curl -i -X POST https://memgauge.onrender.com/v1/memories -H 'content-type: application/json' -d '{}'   # -> 401
+# Generate a run (also creates the Neo4j constraints on first execution), then view the report page:
+curl -X POST https://memgauge.onrender.com/v1/eval/run \
+  -H "authorization: Bearer $MEMGAUGE_API_TOKEN" \
+  -H 'content-type: application/json' -d '{"dataset":"all"}'
+# open https://memgauge.onrender.com/report/<run_id>
 ```
+
+(The exact hostname is assigned by Render — `memgauge.onrender.com` or a
+suffixed variant; record the real one here after the first deploy.)
+
+## Alternative: Fly.io (paid, ~$0–5/mo — requires a credit card)
+
+A ready `fly.toml` is also committed for deploying on Fly instead: same image,
+same secrets (set via `fly secrets set` after `fly launch --no-deploy`, then
+`fly deploy`). Fly has no card-free tier, which is why Render is the chosen
+zero-cost path; prefer Fly if you want no idle spin-down semantics and are
+willing to pay a few dollars a month.
 
 ## What is intentionally not deployed
 

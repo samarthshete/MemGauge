@@ -1,0 +1,37 @@
+# Render Blueprint for the MemGauge API — the ZERO-COST deploy path (see DEPLOY.md).
+# Free tier, no credit card. Runs the existing Dockerfile unchanged; Render
+# injects PORT and the CMD already honors it.
+# Non-secret config only — credentials are set in the Render dashboard
+# (sync: false below means "prompt for the value, never store it in git").
+services:
+  - type: web
+    name: memgauge
+    runtime: docker
+    plan: free
+    region: virginia
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      # The public demo runs the secret-free deterministic backend by policy
+      # (PROJECT.md ADR-1); the mem0 backend is local-only.
+      - key: MEMGAUGE_BACKEND
+        value: mock
+      # Unloadable model name -> deterministic 384-d hash embedder: no model
+      # download, matches what CI/R1 verified, fits the 512 MB free instance.
+      - key: EMBEDDING_MODEL
+        value: __offline-deploy-model__
+      - key: RATE_LIMIT_PER_MIN
+        value: "60"
+      # Secrets — values entered at deploy time, never committed.
+      - key: MEMGAUGE_API_TOKEN
+        sync: false
+      - key: POSTGRES_DSN
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USER
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: REDIS_URL
+        sync: false
